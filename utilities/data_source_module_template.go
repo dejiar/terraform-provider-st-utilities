@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -72,11 +73,21 @@ func (d *moduleTemplateDataSource) Read(ctx context.Context, req datasource.Read
 		return
 	}
 
+	// Sort module_info keys for deterministic replacement order.
+	// Go randomizes map iteration order, which causes plan/apply inconsistency
+	// when template values contain multiple {key} placeholders.
+	infoKeys := make([]string, 0, len(moduleInfoInput))
+	for k := range moduleInfoInput {
+		infoKeys = append(infoKeys, k)
+	}
+	sort.Strings(infoKeys)
+
 	re := regexp.MustCompile(`{(.*?)}`)
 	moduleTmplResult := make(map[string]attr.Value)
 	for tmplKey, tmplValue := range moduleTmplInput {
-		for infoKey, infoValue := range moduleInfoInput {
-			tmplValue = strings.Replace(tmplValue, fmt.Sprintf("{%s}", infoKey), infoValue, 1)
+		for _, infoKey := range infoKeys {
+			infoValue := moduleInfoInput[infoKey]
+			tmplValue = strings.ReplaceAll(tmplValue, fmt.Sprintf("{%s}", infoKey), infoValue)
 		}
 		containIllegal := re.FindAllStringSubmatch(tmplValue, -1)
 		if len(containIllegal) > 0 {
